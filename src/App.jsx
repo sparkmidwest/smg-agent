@@ -1,55 +1,42 @@
-// ── AI ASSISTANT ──────────────────────────────────────────
-  async function askAI() {
-    if (!aiQuery.trim()) return;
-    setAiLoading(true);
-    setAiResponse("");
+import { useState, useEffect } from "react";
 
-    var clientContext = CLIENTS.map(function(c) {
-      return c.name + " (" + c.business + "): TU " + c.tu + " / EX " + c.ex + " / EQ " + c.eq +
-        " | Plan: " + c.plan + " | Retainer: $" + c.retainer + (c.retainerPaid ? " PAID" : " UNPAID") +
-        " | Goal: " + c.goal +
-        " | Key items: " + c.keyItems.join("; ") +
-        " | Pending docs: " + c.pendingDocs.join(", ");
-    }).join("\n\n");
+const SUPABASE_URL = "https://sptshgnjazpceumdghwh.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNwdHNoZ25qYXpwY2V1bWRnaHdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1MTc3MzgsImV4cCI6MjA5MTA5MzczOH0.HHfe3CMrw3jx0pRHoniZvRgZ7rKFRIFNTbcBnj1V1m8";
 
-    var pendingTasksList = tasks.filter(function(t){ return !t.done; }).map(function(t){
-      var client = CLIENTS.find(function(c){ return c.id === t.clientId; });
-      return (client ? client.name : t.clientId) + " — " + t.title + " [" + t.priority + "]";
-    }).join("\n");
+const GOLD = "#F59E0B";
+const DARK = "#0D1B2A";
+const MID  = "#1B3A5C";
 
-    var recentLogs = logs.slice(0,10).map(function(l){
-      var client = CLIENTS.find(function(c){ return c.id === l.clientId; });
-      return (client ? client.name : l.clientId) + " [" + l.type + "]: " + l.summary;
-    }).join("\n");
-
-    var system = "You are the AI assistant for Spark Midwest Group (SMG), a credit consulting and funding strategy company run by Naomi Jackson. " +
-      "You have full knowledge of all SMG clients, their credit profiles, business structures, funding strategies, and pending tasks. " +
-      "SMG retains 100% of all client retainers. FAME (Sheikh) earns 5% success fee only on capital secured. " +
-      "Be direct, specific, and actionable. Reference specific client data in your answers.\n\n" +
-      "CURRENT CLIENT DATA:\n" + clientContext + "\n\n" +
-      "PENDING TASKS:\n" + (pendingTasksList || "None") + "\n\n" +
-      "RECENT INTERACTIONS:\n" + (recentLogs || "None");
-
-    try {
-      var res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system: system,
-          messages: [{ role: "user", content: aiQuery }]
-        })
-      });
-      var data = await res.json();
-      if (!res.ok) {
-        setAiResponse("Error: " + (data.error || "HTTP " + res.status));
-      } else {
-        setAiResponse(data.text || "No response.");
-      }
-    } catch(e) {
-      setAiResponse("Error: " + e.message);
+// ── SUPABASE HELPERS ─────────────────────────────────────────
+function sbFetch(path, opts) {
+  var method = (opts && opts.method) || "GET";
+  var body   = (opts && opts.body)   || undefined;
+  var prefer = (opts && opts.prefer) || "return=representation";
+  return fetch(SUPABASE_URL + "/rest/v1/" + path, {
+    method, body,
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + SUPABASE_KEY,
+      "Content-Type": "application/json",
+      "Prefer": prefer
     }
-    setAiLoading(false);
-  }
+  }).then(function(r) {
+    if (!r.ok) return r.text().then(function(e){ console.error("SB:", e); return null; });
+    return r.text().then(function(t){ return t ? JSON.parse(t) : null; });
+  }).catch(function(e){ console.error("sbFetch:", e); return null; });
+}
+
+function sbUpsert(table, row) {
+  return sbFetch(table, {
+    method: "POST",
+    prefer: "resolution=merge-duplicates,return=representation",
+    body: JSON.stringify(row)
+  }).then(function(d){ return d ? d[0] : null; });
+}
+
+function sbDelete(table, filter) {
+  return sbFetch(table + "?" + filter, { method: "DELETE" });
+}
 
 // ── STATIC CLIENT DATA (synced with SMG files) ───────────────
 var CLIENTS = [
@@ -252,7 +239,7 @@ export default function SMGAgent() {
         " | Pending docs: " + c.pendingDocs.join(", ");
     }).join("\n\n");
 
-    var pendingTasks = tasks.filter(function(t){ return !t.done; }).map(function(t){
+    var pendingTasksList = tasks.filter(function(t){ return !t.done; }).map(function(t){
       var client = CLIENTS.find(function(c){ return c.id === t.clientId; });
       return (client ? client.name : t.clientId) + " — " + t.title + " [" + t.priority + "]";
     }).join("\n");
@@ -267,23 +254,24 @@ export default function SMGAgent() {
       "SMG retains 100% of all client retainers. FAME (Sheikh) earns 5% success fee only on capital secured. " +
       "Be direct, specific, and actionable. Reference specific client data in your answers.\n\n" +
       "CURRENT CLIENT DATA:\n" + clientContext + "\n\n" +
-      "PENDING TASKS:\n" + (pendingTasks || "None") + "\n\n" +
+      "PENDING TASKS:\n" + (pendingTasksList || "None") + "\n\n" +
       "RECENT INTERACTIONS:\n" + (recentLogs || "None");
 
     try {
-      var res = await fetch("https://api.anthropic.com/v1/messages", {
+      var res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
           system: system,
           messages: [{ role: "user", content: aiQuery }]
         })
       });
       var data = await res.json();
-      var text = (data.content || []).filter(function(b){ return b.type==="text"; }).map(function(b){ return b.text; }).join("");
-      setAiResponse(text || "No response.");
+      if (!res.ok) {
+        setAiResponse("Error: " + (data.error || "HTTP " + res.status));
+      } else {
+        setAiResponse(data.text || "No response.");
+      }
     } catch(e) {
       setAiResponse("Error: " + e.message);
     }
