@@ -49,6 +49,42 @@ async function sbDelete(table, filter) {
 // ── STATIC CLIENT DATA ───────────────────────────────────────
 var CLIENTS = [
   {
+    id: "trae",
+    name: "Trae Douglas Tiller",
+    email: "ttillz63@gmail.com",
+    phone: "(614) 424-9782",
+    business: "Ohio LLC (name pending at signing)",
+    ein: "TBC at signing",
+    state: "OH",
+    plan: "SPARK Personal + Business",
+    retainer: 4000,
+    retainerPaid: true,
+    monitor: false,
+    tu: "N/A", ex: "N/A", eq: "N/A",
+    goal: "Personal Cleanup + Business Credit Build + Funding Prep",
+    status: "active",
+    avatar: "TT",
+    color: "#06B6D4",
+    keyItems: [
+      "Personal credit cleanup — finalize remaining ID-theft accounts from prior filing",
+      "Address removal — 974 Jefferson Chase + other old addresses tied to ID theft",
+      "DL update pending — needs to change OH license to 101 Coyote Willow Dr (Reynoldsburg)",
+      "Business credit buildout starts 6/1/26 — D&B/Paydex, net-30 vendors, banking optimization",
+      "$1,000 personal deposit paid Zelle 5/9/26 — billed at $150/hr + reimbursable costs",
+      "$500/mo x 6 months business retainer starts 6/1/26 ($3,000 total)",
+      "Referral partner — $150 flat per paid client he refers",
+      "Contract sent via DocuSign 5/12/26 — awaiting signature, 3-day cancel clock starts at sig",
+    ],
+    pendingDocs: [
+      "Signed DocuSign contract (sent 5/12/26)",
+      "Business entity legal name + EIN (Trae filling in at signing)",
+      "Credit reports — all 3 bureaus (after contract signed)",
+      "Identity theft filing documentation from prior case",
+      "Updated DL with Coyote Willow address",
+    ],
+  },
+ 
+  {
     id: "riche",
     name: "Jamel 'Riche' Runcie Shade",
     email: "northernamericangroupllc@gmail.com",
