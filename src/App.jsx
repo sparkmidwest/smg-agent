@@ -1,44 +1,52 @@
 import { useState, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://sptshgnjazpceumdghwh.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNwdHNoZ25qYXpwY2V1bWRnaHdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1MTc3MzgsImV4cCI6MjA5MTA5MzczOH0.HHfe3CMrw3jx0pRHoniZvRgZ7rKFRIFNTbcBnj1V1m8";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const GOLD = "#F59E0B";
 const DARK = "#0D1B2A";
 const MID  = "#1B3A5C";
 
-// ── SUPABASE HELPERS ─────────────────────────────────────────
-function sbFetch(path, opts) {
+// ── SUPABASE HELPERS (use auth session) ──────────────────────
+async function sbFetch(path, opts) {
   var method = (opts && opts.method) || "GET";
   var body   = (opts && opts.body)   || undefined;
   var prefer = (opts && opts.prefer) || "return=representation";
-  return fetch(SUPABASE_URL + "/rest/v1/" + path, {
-    method, body,
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": "Bearer " + SUPABASE_KEY,
-      "Content-Type": "application/json",
-      "Prefer": prefer
-    }
-  }).then(function(r) {
-    if (!r.ok) return r.text().then(function(e){ console.error("SB:", e); return null; });
-    return r.text().then(function(t){ return t ? JSON.parse(t) : null; });
-  }).catch(function(e){ console.error("sbFetch:", e); return null; });
+  var session = (await supabase.auth.getSession()).data.session;
+  var token = session ? session.access_token : SUPABASE_KEY;
+  try {
+    var r = await fetch(SUPABASE_URL + "/rest/v1/" + path, {
+      method, body,
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json",
+        "Prefer": prefer
+      }
+    });
+    if (!r.ok) { var e = await r.text(); console.error("SB:", e); return null; }
+    var t = await r.text();
+    return t ? JSON.parse(t) : null;
+  } catch(e) { console.error("sbFetch:", e); return null; }
 }
 
-function sbUpsert(table, row) {
-  return sbFetch(table, {
+async function sbUpsert(table, row) {
+  var d = await sbFetch(table, {
     method: "POST",
     prefer: "resolution=merge-duplicates,return=representation",
     body: JSON.stringify(row)
-  }).then(function(d){ return d ? d[0] : null; });
+  });
+  return d ? d[0] : null;
 }
 
-function sbDelete(table, filter) {
+async function sbDelete(table, filter) {
   return sbFetch(table + "?" + filter, { method: "DELETE" });
 }
 
-// ── STATIC CLIENT DATA (synced with SMG files) ───────────────
+// ── STATIC CLIENT DATA ───────────────────────────────────────
 var CLIENTS = [
   {
     id: "riche",
@@ -157,8 +165,97 @@ var PRIORITIES = ["urgent", "high", "medium", "low"];
 var TASK_TYPES = ["dispute", "filing", "funding", "document", "call", "meeting", "follow-up", "other"];
 var LOG_TYPES  = ["call", "meeting", "text", "email", "note"];
 
+// ── LOGIN SCREEN ─────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  var [email, setEmail] = useState("");
+  var [password, setPassword] = useState("");
+  var [error, setError] = useState("");
+  var [loading, setLoading] = useState(false);
+
+  async function handleLogin(e) {
+    if (e) e.preventDefault();
+    setError("");
+    setLoading(true);
+    var result = await supabase.auth.signInWithPassword({ email: email, password: password });
+    setLoading(false);
+    if (result.error) {
+      setError(result.error.message);
+    } else {
+      onLogin(result.data.session);
+    }
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", background:DARK, display:"flex", alignItems:"center", justifyContent:"center", padding:20, fontFamily:"'DM Sans', system-ui, sans-serif" }}>
+      <div style={{ background:"white", borderRadius:20, padding:"40px 36px", width:"100%", maxWidth:380, boxShadow:"0 20px 60px rgba(0,0,0,0.4)" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <path d="M14 0 L15.5 12.5 L28 14 L15.5 15.5 L14 28 L12.5 15.5 L0 14 L12.5 12.5 Z" fill="#5BC8F5"/>
+          </svg>
+          <span style={{ fontSize:24, fontWeight:700, color:DARK, letterSpacing:-1 }}>spark.</span>
+        </div>
+        <div style={{ fontSize:11, color:"#94A3B8", letterSpacing:2, textTransform:"uppercase", marginBottom:28 }}>SMG Agent · Internal</div>
+
+        <form onSubmit={handleLogin} style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div>
+            <div style={{ fontSize:11, color:"#64748B", marginBottom:6, fontWeight:600 }}>Email</div>
+            <input type="email" value={email} onChange={function(e){ setEmail(e.target.value); }}
+              required autoFocus
+              style={{ width:"100%", padding:"11px 14px", border:"1px solid #E2E8F0", borderRadius:8, fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }} />
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:"#64748B", marginBottom:6, fontWeight:600 }}>Password</div>
+            <input type="password" value={password} onChange={function(e){ setPassword(e.target.value); }}
+              required
+              style={{ width:"100%", padding:"11px 14px", border:"1px solid #E2E8F0", borderRadius:8, fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }} />
+          </div>
+          {error && (
+            <div style={{ fontSize:12, color:"#B91C1C", background:"#FEE2E2", padding:"8px 12px", borderRadius:6 }}>
+              {error}
+            </div>
+          )}
+          <button type="submit" disabled={loading || !email || !password}
+            style={{ marginTop:8, padding:"12px", background:DARK, color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", opacity: (loading || !email || !password) ? 0.5 : 1 }}>
+            {loading ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+
+        <div style={{ marginTop:24, fontSize:10, color:"#94A3B8", textAlign:"center" }}>
+          Spark Midwest Group · Internal Use Only
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ROOT — auth gate ─────────────────────────────────────────
+export default function Root() {
+  var [session, setSession] = useState(null);
+  var [checking, setChecking] = useState(true);
+
+  useEffect(function() {
+    supabase.auth.getSession().then(function(r) {
+      setSession(r.data.session);
+      setChecking(false);
+    });
+    var sub = supabase.auth.onAuthStateChange(function(_e, s) { setSession(s); });
+    return function() { sub.data.subscription.unsubscribe(); };
+  }, []);
+
+  if (checking) {
+    return (
+      <div style={{ minHeight:"100vh", background:DARK, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontFamily:"'DM Sans', system-ui, sans-serif", fontSize:14 }}>
+        Loading...
+      </div>
+    );
+  }
+
+  if (!session) return <LoginScreen onLogin={setSession} />;
+  return <SMGAgent onLogout={function(){ supabase.auth.signOut(); }} />;
+}
+
 // ── MAIN APP ─────────────────────────────────────────────────
-export default function SMGAgent() {
+function SMGAgent({ onLogout }) {
   var [view,        setView]        = useState("dashboard");
   var [activeClient,setActiveClient]= useState(null);
   var [tasks,       setTasks]       = useState([]);
@@ -173,7 +270,6 @@ export default function SMGAgent() {
   var [newLog,      setNewLog]      = useState({ clientId:"", type:"call", summary:"", notes:"" });
   var [filterClient,setFilterClient]= useState("all");
 
-  // Load from Supabase
   useEffect(function() {
     (async function() {
       setLoading(true);
@@ -187,7 +283,6 @@ export default function SMGAgent() {
     })();
   }, []);
 
-  // ── TASK CRUD ──────────────────────────────────────────────
   async function addTask() {
     var t = Object.assign({}, newTask, {
       id: "task_" + Date.now(),
@@ -213,7 +308,6 @@ export default function SMGAgent() {
     setTasks(function(prev){ return prev.filter(function(t){ return t.id !== id; }); });
   }
 
-  // ── LOG CRUD ───────────────────────────────────────────────
   async function addLog() {
     var l = Object.assign({}, newLog, {
       id: "log_" + Date.now(),
@@ -225,7 +319,6 @@ export default function SMGAgent() {
     setShowAddLog(false);
   }
 
-  // ── AI ASSISTANT ──────────────────────────────────────────
   async function askAI() {
     if (!aiQuery.trim()) return;
     setAiLoading(true);
@@ -278,7 +371,6 @@ export default function SMGAgent() {
     setAiLoading(false);
   }
 
-  // ── HELPERS ────────────────────────────────────────────────
   function getClient(id) { return CLIENTS.find(function(c){ return c.id===id; }); }
   function clientTasks(id) { return tasks.filter(function(t){ return t.clientId===id; }); }
   function clientLogs(id)  { return logs.filter(function(l){ return l.clientId===id; }); }
@@ -289,13 +381,9 @@ export default function SMGAgent() {
     ? tasks
     : tasks.filter(function(t){ return t.clientId === filterClient; });
 
-  // ── RENDER ─────────────────────────────────────────────────
   return (
     <div style={{ display:"flex", minHeight:"100vh", background:"#F0F4F8", fontFamily:"'DM Sans', system-ui, sans-serif" }}>
-
-      {/* SIDEBAR */}
       <div style={{ width:220, background:DARK, display:"flex", flexDirection:"column", flexShrink:0, padding:"20px 0" }}>
-        {/* Logo */}
         <div style={{ padding:"0 20px 20px", borderBottom:"0.5px solid rgba(255,255,255,0.1)", marginBottom:16 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
             <svg width="18" height="18" viewBox="0 0 28 28" fill="none">
@@ -306,7 +394,6 @@ export default function SMGAgent() {
           <div style={{ fontSize:9, color:"#6B7280", letterSpacing:2, textTransform:"uppercase" }}>SMG Agent · Internal</div>
         </div>
 
-        {/* Nav */}
         {[
           { id:"dashboard", icon:"⬡", label:"Dashboard" },
           { id:"clients",   icon:"◈", label:"Clients" },
@@ -327,7 +414,6 @@ export default function SMGAgent() {
           );
         })}
 
-        {/* Client quick links */}
         <div style={{ padding:"16px 20px 8px", marginTop:8, borderTop:"0.5px solid rgba(255,255,255,0.08)" }}>
           <div style={{ fontSize:9, color:"#4B5563", letterSpacing:2, textTransform:"uppercase", marginBottom:10 }}>Clients</div>
           {CLIENTS.map(function(c) {
@@ -352,12 +438,16 @@ export default function SMGAgent() {
             );
           })}
         </div>
+
+        <div style={{ marginTop:"auto", padding:"16px 20px", borderTop:"0.5px solid rgba(255,255,255,0.08)" }}>
+          <button onClick={onLogout}
+            style={{ width:"100%", padding:"8px", background:"transparent", border:"0.5px solid rgba(255,255,255,0.15)", borderRadius:6, color:"#9CA3AF", fontSize:11, cursor:"pointer" }}>
+            Sign out
+          </button>
+        </div>
       </div>
 
-      {/* MAIN CONTENT */}
       <div style={{ flex:1, overflow:"auto" }}>
-
-        {/* Top bar */}
         <div style={{ background:"white", padding:"14px 24px", borderBottom:"0.5px solid #E2E8F0",
           display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:10 }}>
           <div>
@@ -386,11 +476,8 @@ export default function SMGAgent() {
         </div>
 
         <div style={{ padding:24 }}>
-
-          {/* ── DASHBOARD ── */}
           {view === "dashboard" && (
             <div>
-              {/* Stats */}
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12, marginBottom:24 }}>
                 {[
                   { label:"Active Clients",     value:CLIENTS.filter(function(c){ return c.retainerPaid; }).length, color:"#10B981" },
@@ -401,8 +488,7 @@ export default function SMGAgent() {
                   { label:"Total Retainers",     value:"$" + CLIENTS.filter(function(c){ return c.retainerPaid; }).reduce(function(s,c){ return s+c.retainer; },0).toLocaleString(), color:"#10B981" },
                 ].map(function(s,i) {
                   return (
-                    <div key={i} style={{ background:"white", borderRadius:12, padding:"16px 18px",
-                      border:"0.5px solid #E2E8F0" }}>
+                    <div key={i} style={{ background:"white", borderRadius:12, padding:"16px 18px", border:"0.5px solid #E2E8F0" }}>
                       <div style={{ fontSize:11, color:"#94A3B8", marginBottom:6 }}>{s.label}</div>
                       <div style={{ fontSize:22, fontWeight:700, color:s.color }}>{s.value}</div>
                     </div>
@@ -410,38 +496,27 @@ export default function SMGAgent() {
                 })}
               </div>
 
-              {/* Client cards */}
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:16, marginBottom:24 }}>
                 {CLIENTS.map(function(c) {
                   var cTasks = clientTasks(c.id).filter(function(t){ return !t.done; });
                   var urgent = cTasks.filter(function(t){ return t.priority==="urgent"; }).length;
                   return (
                     <div key={c.id} onClick={function(){ setActiveClient(c.id); setView("client_detail"); }}
-                      style={{ background:"white", borderRadius:14, padding:"18px 20px",
-                        border:"0.5px solid #E2E8F0", cursor:"pointer",
-                        borderTop: "3px solid " + c.color }}>
+                      style={{ background:"white", borderRadius:14, padding:"18px 20px", border:"0.5px solid #E2E8F0", cursor:"pointer", borderTop: "3px solid " + c.color }}>
                       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
                         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                          <div style={{ width:36, height:36, borderRadius:"50%", background:c.color + "20",
-                            display:"flex", alignItems:"center", justifyContent:"center",
-                            fontSize:12, fontWeight:700, color:c.color }}>
-                            {c.avatar}
-                          </div>
+                          <div style={{ width:36, height:36, borderRadius:"50%", background:c.color + "20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700, color:c.color }}>{c.avatar}</div>
                           <div>
                             <div style={{ fontSize:13, fontWeight:600, color:DARK }}>{c.name.split(" ").slice(0,2).join(" ")}</div>
                             <div style={{ fontSize:10, color:"#94A3B8" }}>{c.plan}</div>
                           </div>
                         </div>
-                        <div style={{ fontSize:10, fontWeight:600, padding:"3px 8px", borderRadius:99,
-                          background: c.retainerPaid ? "#D1FAE5" : "#FEF3C7",
-                          color: c.retainerPaid ? "#065F46" : "#92400E" }}>
+                        <div style={{ fontSize:10, fontWeight:600, padding:"3px 8px", borderRadius:99, background: c.retainerPaid ? "#D1FAE5" : "#FEF3C7", color: c.retainerPaid ? "#065F46" : "#92400E" }}>
                           {c.retainerPaid ? "Active" : "Pending"}
                         </div>
                       </div>
-
-                      {/* Scores */}
                       <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-                        {[["TU",c.tu,"#3B82F6"],["EX",c.ex,"#8B5CF6"],["EQ",c.eq,"#10B981"]].map(function(s) {
+                        {[["TU",c.tu],["EX",c.ex],["EQ",c.eq]].map(function(s) {
                           var score = typeof s[1]==="number" ? s[1] : null;
                           var color = score ? (score>=740?"#10B981":score>=680?GOLD:score>=620?"#3B82F6":"#EF4444") : "#94A3B8";
                           return (
@@ -452,16 +527,11 @@ export default function SMGAgent() {
                           );
                         })}
                       </div>
-
                       <div style={{ fontSize:11, color:"#64748B", marginBottom:10, lineHeight:1.5 }}>{c.goal}</div>
-
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                         <div style={{ fontSize:11, color:"#94A3B8" }}>{cTasks.length} open tasks</div>
                         {urgent > 0 && (
-                          <div style={{ fontSize:10, fontWeight:600, padding:"2px 8px", borderRadius:99,
-                            background:"#FEE2E2", color:"#B91C1C" }}>
-                            {urgent} urgent
-                          </div>
+                          <div style={{ fontSize:10, fontWeight:600, padding:"2px 8px", borderRadius:99, background:"#FEE2E2", color:"#B91C1C" }}>{urgent} urgent</div>
                         )}
                       </div>
                     </div>
@@ -469,22 +539,19 @@ export default function SMGAgent() {
                 })}
               </div>
 
-              {/* Urgent tasks */}
               {urgentTasks().length > 0 && (
                 <div style={{ background:"white", borderRadius:14, padding:"18px 20px", border:"0.5px solid #E2E8F0" }}>
                   <div style={{ fontSize:13, fontWeight:600, color:"#B91C1C", marginBottom:14 }}>🚨 Urgent Tasks</div>
                   {urgentTasks().slice(0,5).map(function(t) {
                     var c = getClient(t.clientId);
                     return (
-                      <div key={t.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"8px 0",
-                        borderBottom:"0.5px solid #F1F5F9" }}>
+                      <div key={t.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"8px 0", borderBottom:"0.5px solid #F1F5F9" }}>
                         <input type="checkbox" checked={t.done} onChange={function(){ toggleTask(t.id); }} style={{ cursor:"pointer" }} />
                         <div style={{ flex:1 }}>
                           <div style={{ fontSize:12, fontWeight:500, color:DARK }}>{t.title}</div>
                           <div style={{ fontSize:10, color:"#94A3B8" }}>{c ? c.name.split(" ")[0] : t.clientId} · {t.type} {t.due ? "· Due " + t.due : ""}</div>
                         </div>
-                        <button onClick={function(){ deleteTask(t.id); }}
-                          style={{ fontSize:11, color:"#EF4444", background:"none", border:"none", cursor:"pointer" }}>✕</button>
+                        <button onClick={function(){ deleteTask(t.id); }} style={{ fontSize:11, color:"#EF4444", background:"none", border:"none", cursor:"pointer" }}>✕</button>
                       </div>
                     );
                   })}
@@ -493,7 +560,6 @@ export default function SMGAgent() {
             </div>
           )}
 
-          {/* ── CLIENT DETAIL ── */}
           {view === "client_detail" && activeClient && (function(){
             var c = getClient(activeClient);
             if (!c) return null;
@@ -501,21 +567,11 @@ export default function SMGAgent() {
             var cLogs  = clientLogs(c.id);
             return (
               <div>
-                <button onClick={function(){ setView("clients"); setActiveClient(null); }}
-                  style={{ fontSize:12, color:"#64748B", background:"none", border:"none", cursor:"pointer", marginBottom:16 }}>
-                  ← Back to clients
-                </button>
-
-                {/* Header */}
-                <div style={{ background:"white", borderRadius:14, padding:"20px 24px", border:"0.5px solid #E2E8F0",
-                  marginBottom:16, borderTop:"4px solid " + c.color }}>
+                <button onClick={function(){ setView("clients"); setActiveClient(null); }} style={{ fontSize:12, color:"#64748B", background:"none", border:"none", cursor:"pointer", marginBottom:16 }}>← Back to clients</button>
+                <div style={{ background:"white", borderRadius:14, padding:"20px 24px", border:"0.5px solid #E2E8F0", marginBottom:16, borderTop:"4px solid " + c.color }}>
                   <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:16 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-                      <div style={{ width:48, height:48, borderRadius:"50%", background:c.color + "20",
-                        display:"flex", alignItems:"center", justifyContent:"center",
-                        fontSize:16, fontWeight:700, color:c.color }}>
-                        {c.avatar}
-                      </div>
+                      <div style={{ width:48, height:48, borderRadius:"50%", background:c.color + "20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, fontWeight:700, color:c.color }}>{c.avatar}</div>
                       <div>
                         <div style={{ fontSize:18, fontWeight:700, color:DARK }}>{c.name}</div>
                         <div style={{ fontSize:12, color:"#64748B" }}>{c.business}</div>
@@ -523,16 +579,13 @@ export default function SMGAgent() {
                       </div>
                     </div>
                     <div style={{ textAlign:"right" }}>
-                      <div style={{ fontSize:11, fontWeight:600, padding:"4px 12px", borderRadius:99, marginBottom:6,
-                        background: c.retainerPaid ? "#D1FAE5" : "#FEF3C7",
-                        color: c.retainerPaid ? "#065F46" : "#92400E" }}>
+                      <div style={{ fontSize:11, fontWeight:600, padding:"4px 12px", borderRadius:99, marginBottom:6, background: c.retainerPaid ? "#D1FAE5" : "#FEF3C7", color: c.retainerPaid ? "#065F46" : "#92400E" }}>
                         {c.retainerPaid ? "● Retainer Paid — $" + c.retainer.toLocaleString() : "● Retainer UNPAID"}
                       </div>
                       <div style={{ fontSize:11, color:"#94A3B8" }}>{c.plan} {c.monitor ? "· Monitor $97/mo" : "· No Monitor yet"}</div>
                     </div>
                   </div>
 
-                  {/* Score bars */}
                   <div style={{ display:"flex", gap:12, marginBottom:16 }}>
                     {[["TransUnion",c.tu],["Experian",c.ex],["Equifax",c.eq]].map(function(s) {
                       var score = typeof s[1]==="number" ? s[1] : null;
@@ -557,32 +610,25 @@ export default function SMGAgent() {
                 </div>
 
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
-                  {/* Key items */}
                   <div style={{ background:"white", borderRadius:14, padding:"18px 20px", border:"0.5px solid #E2E8F0" }}>
                     <div style={{ fontSize:13, fontWeight:600, color:DARK, marginBottom:12 }}>Key Items</div>
                     {c.keyItems.map(function(item, i) {
                       var isUrgent = item.toLowerCase().includes("urgent") || item.toLowerCase().includes("not paid") || item.toLowerCase().includes("suspended") || item.toLowerCase().includes("not pulled");
                       return (
-                        <div key={i} style={{ display:"flex", gap:8, padding:"6px 0",
-                          borderBottom: i<c.keyItems.length-1 ? "0.5px solid #F1F5F9" : "none" }}>
-                          <span style={{ color: isUrgent ? "#EF4444" : "#10B981", fontSize:11, flexShrink:0, marginTop:1 }}>
-                            {isUrgent ? "⚠" : "✓"}
-                          </span>
+                        <div key={i} style={{ display:"flex", gap:8, padding:"6px 0", borderBottom: i<c.keyItems.length-1 ? "0.5px solid #F1F5F9" : "none" }}>
+                          <span style={{ color: isUrgent ? "#EF4444" : "#10B981", fontSize:11, flexShrink:0, marginTop:1 }}>{isUrgent ? "⚠" : "✓"}</span>
                           <span style={{ fontSize:11, color: isUrgent ? "#B91C1C" : "#374151", lineHeight:1.5 }}>{item}</span>
                         </div>
                       );
                     })}
                   </div>
-
-                  {/* Pending docs */}
                   <div style={{ background:"white", borderRadius:14, padding:"18px 20px", border:"0.5px solid #E2E8F0" }}>
                     <div style={{ fontSize:13, fontWeight:600, color:DARK, marginBottom:12 }}>Pending Documents</div>
                     {c.pendingDocs.length === 0
                       ? <div style={{ fontSize:12, color:"#10B981" }}>✓ All documents received</div>
                       : c.pendingDocs.map(function(doc,i) {
                           return (
-                            <div key={i} style={{ display:"flex", gap:8, padding:"6px 0",
-                              borderBottom: i<c.pendingDocs.length-1 ? "0.5px solid #F1F5F9" : "none" }}>
+                            <div key={i} style={{ display:"flex", gap:8, padding:"6px 0", borderBottom: i<c.pendingDocs.length-1 ? "0.5px solid #F1F5F9" : "none" }}>
                               <span style={{ color:"#EF4444", fontSize:11, flexShrink:0 }}>○</span>
                               <span style={{ fontSize:11, color:"#B91C1C" }}>{doc}</span>
                             </div>
@@ -592,51 +638,37 @@ export default function SMGAgent() {
                   </div>
                 </div>
 
-                {/* Tasks for this client */}
                 <div style={{ background:"white", borderRadius:14, padding:"18px 20px", border:"0.5px solid #E2E8F0", marginBottom:16 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                     <div style={{ fontSize:13, fontWeight:600, color:DARK }}>Tasks ({cTasks.filter(function(t){ return !t.done; }).length} open)</div>
-                    <button onClick={function(){ setNewTask(function(p){ return Object.assign({},p,{clientId:c.id}); }); setShowAddTask(true); }}
-                      style={{ fontSize:11, padding:"5px 12px", background:DARK, color:"white", border:"none", borderRadius:6, cursor:"pointer" }}>
-                      + Add Task
-                    </button>
+                    <button onClick={function(){ setNewTask(function(p){ return Object.assign({},p,{clientId:c.id}); }); setShowAddTask(true); }} style={{ fontSize:11, padding:"5px 12px", background:DARK, color:"white", border:"none", borderRadius:6, cursor:"pointer" }}>+ Add Task</button>
                   </div>
                   {cTasks.length === 0
                     ? <div style={{ fontSize:12, color:"#94A3B8" }}>No tasks yet — add one above</div>
                     : cTasks.map(function(t) {
                         return (
-                          <div key={t.id} style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"8px 0",
-                            borderBottom:"0.5px solid #F1F5F9", opacity: t.done ? 0.5 : 1 }}>
+                          <div key={t.id} style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"8px 0", borderBottom:"0.5px solid #F1F5F9", opacity: t.done ? 0.5 : 1 }}>
                             <input type="checkbox" checked={t.done} onChange={function(){ toggleTask(t.id); }} style={{ marginTop:2, cursor:"pointer" }} />
                             <div style={{ flex:1 }}>
                               <div style={{ fontSize:12, fontWeight:500, color:DARK, textDecoration: t.done ? "line-through" : "none" }}>{t.title}</div>
                               <div style={{ display:"flex", gap:6, marginTop:3 }}>
-                                <span style={{ fontSize:9, padding:"1px 6px", borderRadius:99, background:
-                                  t.priority==="urgent"?"#FEE2E2":t.priority==="high"?"#FEF3C7":t.priority==="medium"?"#EFF6FF":"#F0FDF4",
-                                  color: t.priority==="urgent"?"#B91C1C":t.priority==="high"?"#92400E":t.priority==="medium"?"#1E40AF":"#166534" }}>
-                                  {t.priority}
-                                </span>
+                                <span style={{ fontSize:9, padding:"1px 6px", borderRadius:99, background: t.priority==="urgent"?"#FEE2E2":t.priority==="high"?"#FEF3C7":t.priority==="medium"?"#EFF6FF":"#F0FDF4", color: t.priority==="urgent"?"#B91C1C":t.priority==="high"?"#92400E":t.priority==="medium"?"#1E40AF":"#166534" }}>{t.priority}</span>
                                 <span style={{ fontSize:9, color:"#94A3B8" }}>{t.type}</span>
                                 {t.due && <span style={{ fontSize:9, color:"#94A3B8" }}>Due {t.due}</span>}
                               </div>
                               {t.notes && <div style={{ fontSize:10, color:"#64748B", marginTop:3 }}>{t.notes}</div>}
                             </div>
-                            <button onClick={function(){ deleteTask(t.id); }}
-                              style={{ fontSize:11, color:"#EF4444", background:"none", border:"none", cursor:"pointer" }}>✕</button>
+                            <button onClick={function(){ deleteTask(t.id); }} style={{ fontSize:11, color:"#EF4444", background:"none", border:"none", cursor:"pointer" }}>✕</button>
                           </div>
                         );
                       })
                   }
                 </div>
 
-                {/* Interaction log for this client */}
                 <div style={{ background:"white", borderRadius:14, padding:"18px 20px", border:"0.5px solid #E2E8F0" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                     <div style={{ fontSize:13, fontWeight:600, color:DARK }}>Interaction Log ({cLogs.length})</div>
-                    <button onClick={function(){ setNewLog(function(p){ return Object.assign({},p,{clientId:c.id}); }); setShowAddLog(true); }}
-                      style={{ fontSize:11, padding:"5px 12px", background:GOLD, color:DARK, border:"none", borderRadius:6, cursor:"pointer", fontWeight:600 }}>
-                      + Log Interaction
-                    </button>
+                    <button onClick={function(){ setNewLog(function(p){ return Object.assign({},p,{clientId:c.id}); }); setShowAddLog(true); }} style={{ fontSize:11, padding:"5px 12px", background:GOLD, color:DARK, border:"none", borderRadius:6, cursor:"pointer", fontWeight:600 }}>+ Log Interaction</button>
                   </div>
                   {cLogs.length === 0
                     ? <div style={{ fontSize:12, color:"#94A3B8" }}>No interactions logged yet</div>
@@ -644,11 +676,7 @@ export default function SMGAgent() {
                         return (
                           <div key={l.id} style={{ padding:"10px 0", borderBottom:"0.5px solid #F1F5F9" }}>
                             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
-                              <span style={{ fontSize:10, fontWeight:600, padding:"2px 8px", borderRadius:99,
-                                background: l.type==="call"?"#EFF6FF":l.type==="meeting"?"#F0FDF4":l.type==="text"?"#FEF3C7":"#F8FAFC",
-                                color: l.type==="call"?"#1E40AF":l.type==="meeting"?"#166534":l.type==="text"?"#92400E":"#64748B" }}>
-                                {l.type}
-                              </span>
+                              <span style={{ fontSize:10, fontWeight:600, padding:"2px 8px", borderRadius:99, background: l.type==="call"?"#EFF6FF":l.type==="meeting"?"#F0FDF4":l.type==="text"?"#FEF3C7":"#F8FAFC", color: l.type==="call"?"#1E40AF":l.type==="meeting"?"#166534":l.type==="text"?"#92400E":"#64748B" }}>{l.type}</span>
                               <span style={{ fontSize:10, color:"#94A3B8" }}>{new Date(l.created_at).toLocaleDateString()}</span>
                             </div>
                             <div style={{ fontSize:12, fontWeight:500, color:DARK, marginBottom:2 }}>{l.summary}</div>
@@ -662,19 +690,12 @@ export default function SMGAgent() {
             );
           })()}
 
-          {/* ── TASKS VIEW ── */}
           {view === "tasks" && (
             <div>
               <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
                 {[["all","All"]].concat(CLIENTS.map(function(c){ return [c.id, c.name.split(" ")[0]]; })).map(function(f) {
                   return (
-                    <button key={f[0]} onClick={function(){ setFilterClient(f[0]); }}
-                      style={{ padding:"6px 14px", fontSize:12, borderRadius:99, cursor:"pointer",
-                        background: filterClient===f[0] ? DARK : "white",
-                        color: filterClient===f[0] ? "white" : "#64748B",
-                        border: filterClient===f[0] ? "none" : "0.5px solid #E2E8F0" }}>
-                      {f[1]}
-                    </button>
+                    <button key={f[0]} onClick={function(){ setFilterClient(f[0]); }} style={{ padding:"6px 14px", fontSize:12, borderRadius:99, cursor:"pointer", background: filterClient===f[0] ? DARK : "white", color: filterClient===f[0] ? "white" : "#64748B", border: filterClient===f[0] ? "none" : "0.5px solid #E2E8F0" }}>{f[1]}</button>
                   );
                 })}
               </div>
@@ -684,30 +705,19 @@ export default function SMGAgent() {
                   : filteredTasks.map(function(t, i) {
                       var c = getClient(t.clientId);
                       return (
-                        <div key={t.id} style={{ display:"flex", alignItems:"flex-start", gap:12, padding:"12px 20px",
-                          borderBottom: i<filteredTasks.length-1 ? "0.5px solid #F1F5F9" : "none",
-                          opacity: t.done ? 0.5 : 1, background: t.priority==="urgent" && !t.done ? "#FFFBF0" : "white" }}>
+                        <div key={t.id} style={{ display:"flex", alignItems:"flex-start", gap:12, padding:"12px 20px", borderBottom: i<filteredTasks.length-1 ? "0.5px solid #F1F5F9" : "none", opacity: t.done ? 0.5 : 1, background: t.priority==="urgent" && !t.done ? "#FFFBF0" : "white" }}>
                           <input type="checkbox" checked={t.done} onChange={function(){ toggleTask(t.id); }} style={{ marginTop:2, cursor:"pointer" }} />
                           <div style={{ flex:1 }}>
                             <div style={{ fontSize:13, fontWeight:500, color:DARK, textDecoration: t.done ? "line-through" : "none", marginBottom:4 }}>{t.title}</div>
                             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                              {c && (
-                                <span style={{ fontSize:10, padding:"1px 8px", borderRadius:99, background:c.color+"20", color:c.color, fontWeight:600 }}>
-                                  {c.name.split(" ")[0]}
-                                </span>
-                              )}
-                              <span style={{ fontSize:10, padding:"1px 8px", borderRadius:99,
-                                background: t.priority==="urgent"?"#FEE2E2":t.priority==="high"?"#FEF3C7":"#F1F5F9",
-                                color: t.priority==="urgent"?"#B91C1C":t.priority==="high"?"#92400E":"#64748B" }}>
-                                {t.priority}
-                              </span>
+                              {c && (<span style={{ fontSize:10, padding:"1px 8px", borderRadius:99, background:c.color+"20", color:c.color, fontWeight:600 }}>{c.name.split(" ")[0]}</span>)}
+                              <span style={{ fontSize:10, padding:"1px 8px", borderRadius:99, background: t.priority==="urgent"?"#FEE2E2":t.priority==="high"?"#FEF3C7":"#F1F5F9", color: t.priority==="urgent"?"#B91C1C":t.priority==="high"?"#92400E":"#64748B" }}>{t.priority}</span>
                               <span style={{ fontSize:10, color:"#94A3B8" }}>{t.type}</span>
                               {t.due && <span style={{ fontSize:10, color:"#94A3B8" }}>Due {t.due}</span>}
                             </div>
                             {t.notes && <div style={{ fontSize:11, color:"#64748B", marginTop:4 }}>{t.notes}</div>}
                           </div>
-                          <button onClick={function(){ deleteTask(t.id); }}
-                            style={{ fontSize:12, color:"#EF4444", background:"none", border:"none", cursor:"pointer", padding:4 }}>✕</button>
+                          <button onClick={function(){ deleteTask(t.id); }} style={{ fontSize:12, color:"#EF4444", background:"none", border:"none", cursor:"pointer", padding:4 }}>✕</button>
                         </div>
                       );
                     })
@@ -716,30 +726,18 @@ export default function SMGAgent() {
             </div>
           )}
 
-          {/* ── LOG VIEW ── */}
           {view === "log" && (
             <div style={{ background:"white", borderRadius:14, border:"0.5px solid #E2E8F0", overflow:"hidden" }}>
               {logs.length === 0
-                ? <div style={{ padding:40, textAlign:"center", fontSize:13, color:"#94A3B8" }}>
-                    No interactions logged yet — use the + Log Interaction button to start tracking
-                  </div>
+                ? <div style={{ padding:40, textAlign:"center", fontSize:13, color:"#94A3B8" }}>No interactions logged yet — use the + Log Interaction button to start tracking</div>
                 : logs.map(function(l, i) {
                     var c = getClient(l.clientId);
                     return (
                       <div key={l.id} style={{ padding:"14px 20px", borderBottom: i<logs.length-1 ? "0.5px solid #F1F5F9" : "none" }}>
                         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-                          {c && (
-                            <div style={{ width:24, height:24, borderRadius:"50%", background:c.color+"20",
-                              display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, color:c.color }}>
-                              {c.avatar}
-                            </div>
-                          )}
+                          {c && (<div style={{ width:24, height:24, borderRadius:"50%", background:c.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, color:c.color }}>{c.avatar}</div>)}
                           <span style={{ fontSize:12, fontWeight:600, color:DARK }}>{c ? c.name.split(" ")[0] + " " + c.name.split(" ")[1] : l.clientId}</span>
-                          <span style={{ fontSize:10, fontWeight:600, padding:"2px 8px", borderRadius:99,
-                            background: l.type==="call"?"#EFF6FF":l.type==="meeting"?"#F0FDF4":l.type==="text"?"#FEF3C7":"#F8FAFC",
-                            color: l.type==="call"?"#1E40AF":l.type==="meeting"?"#166534":l.type==="text"?"#92400E":"#64748B" }}>
-                            {l.type}
-                          </span>
+                          <span style={{ fontSize:10, fontWeight:600, padding:"2px 8px", borderRadius:99, background: l.type==="call"?"#EFF6FF":l.type==="meeting"?"#F0FDF4":l.type==="text"?"#FEF3C7":"#F8FAFC", color: l.type==="call"?"#1E40AF":l.type==="meeting"?"#166534":l.type==="text"?"#92400E":"#64748B" }}>{l.type}</span>
                           <span style={{ fontSize:10, color:"#94A3B8", marginLeft:"auto" }}>{new Date(l.created_at).toLocaleDateString()} {new Date(l.created_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</span>
                         </div>
                         <div style={{ fontSize:13, fontWeight:500, color:DARK, marginBottom:4 }}>{l.summary}</div>
@@ -751,54 +749,27 @@ export default function SMGAgent() {
             </div>
           )}
 
-          {/* ── AI ASSISTANT ── */}
           {view === "ai" && (
             <div>
               <div style={{ background:"white", borderRadius:14, padding:"24px", border:"0.5px solid #E2E8F0", marginBottom:16 }}>
                 <div style={{ fontSize:13, fontWeight:600, color:DARK, marginBottom:6 }}>Ask anything about your clients</div>
-                <div style={{ fontSize:11, color:"#94A3B8", marginBottom:16 }}>
-                  The AI knows all client profiles, scores, tasks, pending docs, and your recent interactions.
-                </div>
+                <div style={{ fontSize:11, color:"#94A3B8", marginBottom:16 }}>The AI knows all client profiles, scores, tasks, pending docs, and your recent interactions.</div>
                 <div style={{ display:"flex", gap:8 }}>
-                  <input value={aiQuery} onChange={function(e){ setAiQuery(e.target.value); }}
-                    onKeyDown={function(e){ if(e.key==="Enter") askAI(); }}
-                    placeholder='e.g. "What are the most urgent things to do for Roberto?" or "What documents are missing from Sheikh?"'
-                    style={{ flex:1, padding:"10px 14px", border:"0.5px solid #E2E8F0", borderRadius:8,
-                      fontSize:13, fontFamily:"inherit", outline:"none" }} />
-                  <button onClick={askAI} disabled={aiLoading || !aiQuery.trim()}
-                    style={{ padding:"10px 20px", background:DARK, color:"white", border:"none",
-                      borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}>
-                    {aiLoading ? "Thinking..." : "Ask AI →"}
-                  </button>
+                  <input value={aiQuery} onChange={function(e){ setAiQuery(e.target.value); }} onKeyDown={function(e){ if(e.key==="Enter") askAI(); }} placeholder='e.g. "What are the most urgent things to do for Roberto?"' style={{ flex:1, padding:"10px 14px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit", outline:"none" }} />
+                  <button onClick={askAI} disabled={aiLoading || !aiQuery.trim()} style={{ padding:"10px 20px", background:DARK, color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}>{aiLoading ? "Thinking..." : "Ask AI →"}</button>
                 </div>
               </div>
 
-              {/* Quick questions */}
               <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
-                {[
-                  "What's the most urgent task across all clients?",
-                  "What documents are still missing?",
-                  "What's the next step for Roberto's Navy Fed deadline?",
-                  "Which clients haven't paid their retainer?",
-                  "Summarize Sheikh's situation",
-                  "What's the status of Riche's MCA payoff plan?",
-                ].map(function(q) {
-                  return (
-                    <button key={q} onClick={function(){ setAiQuery(q); }}
-                      style={{ fontSize:11, padding:"6px 12px", background:"white", border:"0.5px solid #E2E8F0",
-                        borderRadius:99, cursor:"pointer", color:"#64748B" }}>
-                      {q}
-                    </button>
-                  );
+                {["What's the most urgent task across all clients?","What documents are still missing?","What's the next step for Roberto's Navy Fed deadline?","Which clients haven't paid their retainer?","Summarize Sheikh's situation","What's the status of Riche's MCA payoff plan?"].map(function(q) {
+                  return (<button key={q} onClick={function(){ setAiQuery(q); }} style={{ fontSize:11, padding:"6px 12px", background:"white", border:"0.5px solid #E2E8F0", borderRadius:99, cursor:"pointer", color:"#64748B" }}>{q}</button>);
                 })}
               </div>
 
               {aiResponse && (
                 <div style={{ background:"white", borderRadius:14, padding:"20px 24px", border:"0.5px solid #E2E8F0" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
-                    <svg width="16" height="16" viewBox="0 0 28 28" fill="none">
-                      <path d="M14 0 L15.5 12.5 L28 14 L15.5 15.5 L14 28 L12.5 15.5 L0 14 L12.5 12.5 Z" fill="#5BC8F5"/>
-                    </svg>
+                    <svg width="16" height="16" viewBox="0 0 28 28" fill="none"><path d="M14 0 L15.5 12.5 L28 14 L15.5 15.5 L14 28 L12.5 15.5 L0 14 L12.5 12.5 Z" fill="#5BC8F5"/></svg>
                     <span style={{ fontSize:12, fontWeight:600, color:MID }}>SMG AI Agent</span>
                   </div>
                   <div style={{ fontSize:13, color:"#374151", lineHeight:1.8, whiteSpace:"pre-wrap" }}>{aiResponse}</div>
@@ -807,20 +778,13 @@ export default function SMGAgent() {
             </div>
           )}
 
-          {/* ── CLIENTS LIST ── */}
           {view === "clients" && (
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))", gap:16 }}>
               {CLIENTS.map(function(c) {
                 return (
-                  <div key={c.id} onClick={function(){ setActiveClient(c.id); setView("client_detail"); }}
-                    style={{ background:"white", borderRadius:14, padding:"20px", border:"0.5px solid #E2E8F0",
-                      cursor:"pointer", borderLeft:"4px solid " + c.color }}>
+                  <div key={c.id} onClick={function(){ setActiveClient(c.id); setView("client_detail"); }} style={{ background:"white", borderRadius:14, padding:"20px", border:"0.5px solid #E2E8F0", cursor:"pointer", borderLeft:"4px solid " + c.color }}>
                     <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14 }}>
-                      <div style={{ width:40, height:40, borderRadius:"50%", background:c.color+"20",
-                        display:"flex", alignItems:"center", justifyContent:"center",
-                        fontSize:14, fontWeight:700, color:c.color }}>
-                        {c.avatar}
-                      </div>
+                      <div style={{ width:40, height:40, borderRadius:"50%", background:c.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:700, color:c.color }}>{c.avatar}</div>
                       <div>
                         <div style={{ fontSize:14, fontWeight:600, color:DARK }}>{c.name}</div>
                         <div style={{ fontSize:11, color:"#64748B" }}>{c.business}</div>
@@ -831,21 +795,12 @@ export default function SMGAgent() {
                       {[["TU",c.tu],["EX",c.ex],["EQ",c.eq]].map(function(s){
                         var score = typeof s[1]==="number" ? s[1] : null;
                         var color = score ? (score>=740?"#10B981":score>=680?GOLD:score>=620?"#3B82F6":"#EF4444") : "#94A3B8";
-                        return (
-                          <div key={s[0]} style={{ background:"#F8FAFC", borderRadius:8, padding:"8px", textAlign:"center" }}>
-                            <div style={{ fontSize:9, color:"#94A3B8" }}>{s[0]}</div>
-                            <div style={{ fontSize:15, fontWeight:700, color:color }}>{score || "—"}</div>
-                          </div>
-                        );
+                        return (<div key={s[0]} style={{ background:"#F8FAFC", borderRadius:8, padding:"8px", textAlign:"center" }}><div style={{ fontSize:9, color:"#94A3B8" }}>{s[0]}</div><div style={{ fontSize:15, fontWeight:700, color:color }}>{score || "—"}</div></div>);
                       })}
                     </div>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                       <span style={{ fontSize:11, color:"#64748B" }}>{c.plan} · EIN {c.ein}</span>
-                      <span style={{ fontSize:10, fontWeight:600, padding:"3px 8px", borderRadius:99,
-                        background: c.retainerPaid ? "#D1FAE5" : "#FEF3C7",
-                        color: c.retainerPaid ? "#065F46" : "#92400E" }}>
-                        {c.retainerPaid ? "Active" : "Pending"}
-                      </span>
+                      <span style={{ fontSize:10, fontWeight:600, padding:"3px 8px", borderRadius:99, background: c.retainerPaid ? "#D1FAE5" : "#FEF3C7", color: c.retainerPaid ? "#065F46" : "#92400E" }}>{c.retainerPaid ? "Active" : "Pending"}</span>
                     </div>
                   </div>
                 );
@@ -855,78 +810,52 @@ export default function SMGAgent() {
         </div>
       </div>
 
-      {/* ── ADD TASK MODAL ── */}
       {showAddTask && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(13,27,42,0.7)", display:"flex",
-          alignItems:"center", justifyContent:"center", zIndex:9999, padding:16 }}>
+        <div style={{ position:"fixed", inset:0, background:"rgba(13,27,42,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:16 }}>
           <div style={{ background:"white", borderRadius:16, padding:28, width:"100%", maxWidth:440 }}>
             <div style={{ fontSize:16, fontWeight:600, color:DARK, marginBottom:20 }}>Add Task</div>
             <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-              <select value={newTask.clientId} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{clientId:e.target.value}); }) }}
-                style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit" }}>
+              <select value={newTask.clientId} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{clientId:e.target.value}); }) }} style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit" }}>
                 <option value="">Select client</option>
                 {CLIENTS.map(function(c){ return <option key={c.id} value={c.id}>{c.name.split(" ").slice(0,2).join(" ")}</option>; })}
               </select>
-              <input value={newTask.title} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{title:e.target.value}); }) }}
-                placeholder="Task title"
-                style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13 }} />
+              <input value={newTask.title} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{title:e.target.value}); }) }} placeholder="Task title" style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13 }} />
               <div style={{ display:"flex", gap:8 }}>
-                <select value={newTask.type} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{type:e.target.value}); }) }}
-                  style={{ flex:1, padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit" }}>
+                <select value={newTask.type} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{type:e.target.value}); }) }} style={{ flex:1, padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit" }}>
                   {TASK_TYPES.map(function(t){ return <option key={t} value={t}>{t}</option>; })}
                 </select>
-                <select value={newTask.priority} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{priority:e.target.value}); }) }}
-                  style={{ flex:1, padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit" }}>
+                <select value={newTask.priority} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{priority:e.target.value}); }) }} style={{ flex:1, padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit" }}>
                   {PRIORITIES.map(function(p){ return <option key={p} value={p}>{p}</option>; })}
                 </select>
               </div>
-              <input type="date" value={newTask.due} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{due:e.target.value}); }) }}
-                style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13 }} />
-              <textarea value={newTask.notes} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{notes:e.target.value}); }) }}
-                placeholder="Notes (optional)" rows={3}
-                style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit", resize:"vertical" }} />
+              <input type="date" value={newTask.due} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{due:e.target.value}); }) }} style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13 }} />
+              <textarea value={newTask.notes} onChange={function(e){ setNewTask(function(p){ return Object.assign({},p,{notes:e.target.value}); }) }} placeholder="Notes (optional)" rows={3} style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit", resize:"vertical" }} />
               <div style={{ display:"flex", gap:8 }}>
-                <button onClick={function(){ setShowAddTask(false); }}
-                  style={{ flex:1, padding:"10px", background:"#F8FAFC", border:"0.5px solid #E2E8F0",
-                    borderRadius:8, fontSize:13, cursor:"pointer" }}>Cancel</button>
-                <button onClick={addTask} disabled={!newTask.clientId || !newTask.title}
-                  style={{ flex:1, padding:"10px", background:DARK, color:"white",
-                    border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer" }}>Save Task</button>
+                <button onClick={function(){ setShowAddTask(false); }} style={{ flex:1, padding:"10px", background:"#F8FAFC", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, cursor:"pointer" }}>Cancel</button>
+                <button onClick={addTask} disabled={!newTask.clientId || !newTask.title} style={{ flex:1, padding:"10px", background:DARK, color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer" }}>Save Task</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── ADD LOG MODAL ── */}
       {showAddLog && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(13,27,42,0.7)", display:"flex",
-          alignItems:"center", justifyContent:"center", zIndex:9999, padding:16 }}>
+        <div style={{ position:"fixed", inset:0, background:"rgba(13,27,42,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:16 }}>
           <div style={{ background:"white", borderRadius:16, padding:28, width:"100%", maxWidth:440 }}>
             <div style={{ fontSize:16, fontWeight:600, color:DARK, marginBottom:20 }}>Log Interaction</div>
             <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-              <select value={newLog.clientId} onChange={function(e){ setNewLog(function(p){ return Object.assign({},p,{clientId:e.target.value}); }) }}
-                style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit" }}>
+              <select value={newLog.clientId} onChange={function(e){ setNewLog(function(p){ return Object.assign({},p,{clientId:e.target.value}); }) }} style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit" }}>
                 <option value="">Select client</option>
                 {CLIENTS.map(function(c){ return <option key={c.id} value={c.id}>{c.name.split(" ").slice(0,2).join(" ")}</option>; })}
               </select>
-              <select value={newLog.type} onChange={function(e){ setNewLog(function(p){ return Object.assign({},p,{type:e.target.value}); }) }}
-                style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit" }}>
+              <select value={newLog.type} onChange={function(e){ setNewLog(function(p){ return Object.assign({},p,{type:e.target.value}); }) }} style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit" }}>
                 {LOG_TYPES.map(function(t){ return <option key={t} value={t}>{t}</option>; })}
               </select>
-              <input value={newLog.summary} onChange={function(e){ setNewLog(function(p){ return Object.assign({},p,{summary:e.target.value}); }) }}
-                placeholder="Summary (e.g. 'Discussed MCA payoff strategy')"
-                style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13 }} />
-              <textarea value={newLog.notes} onChange={function(e){ setNewLog(function(p){ return Object.assign({},p,{notes:e.target.value}); }) }}
-                placeholder="Detailed notes..." rows={4}
-                style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit", resize:"vertical" }} />
+              <input value={newLog.summary} onChange={function(e){ setNewLog(function(p){ return Object.assign({},p,{summary:e.target.value}); }) }} placeholder="Summary (e.g. 'Discussed MCA payoff strategy')" style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13 }} />
+              <textarea value={newLog.notes} onChange={function(e){ setNewLog(function(p){ return Object.assign({},p,{notes:e.target.value}); }) }} placeholder="Detailed notes..." rows={4} style={{ padding:"9px 12px", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, fontFamily:"inherit", resize:"vertical" }} />
               <div style={{ display:"flex", gap:8 }}>
-                <button onClick={function(){ setShowAddLog(false); }}
-                  style={{ flex:1, padding:"10px", background:"#F8FAFC", border:"0.5px solid #E2E8F0",
-                    borderRadius:8, fontSize:13, cursor:"pointer" }}>Cancel</button>
-                <button onClick={addLog} disabled={!newLog.clientId || !newLog.summary}
-                  style={{ flex:1, padding:"10px", background:GOLD, color:DARK,
-                    border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer" }}>Save Log</button>
+                <button onClick={function(){ setShowAddLog(false); }} style={{ flex:1, padding:"10px", background:"#F8FAFC", border:"0.5px solid #E2E8F0", borderRadius:8, fontSize:13, cursor:"pointer" }}>Cancel</button>
+                <button onClick={addLog} disabled={!newLog.clientId || !newLog.summary} style={{ flex:1, padding:"10px", background:GOLD, color:DARK, border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer" }}>Save Log</button>
               </div>
             </div>
           </div>
